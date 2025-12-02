@@ -1,0 +1,190 @@
+# RevBayes Analysis 
+
+#drop tips in dated phylogeny for simple dec analysis
+# in R (ape)
+
+tree <- read.nexus(file="/Users/maliasantos/Desktop/standard_ORC_FIXED_mcc_meanheights_18Mar25.tre")
+
+tips <- c("Bertiera_bicarpellata_ERR5033627_PAFTOL_006566", "Coffea_canephora_PRJEB4211", "Gardenia_philastrei_ERR5034755",  "Pavetta_ternifolia_ERR5034029", "Mitriostigma_barteri_ERR5034756"
+"Greenea_corymbosa_ERR5033812", "Psydrax_odoratus_ERR5034840", "Steenisia_pleurocarpa_ERR5033821", "Cinchona_pubescens_ERR5033629", "Hillia_parasitica_ERR5033824", "Colletoecema_tortistilum_ERR5033630","Psychotria_pandurata_ERR5033649","Schizocolea_linderi_ERR5033809", "Luculia_gratissima_SRR12328867", "Spigelia_pulchella_ERR5034794", "Sericanthe_lowryana_19388", "Sericanthe_auriculata_19840", "Discospermum_malaccense_ERR5034837_PAFTOL_005238")
+
+
+outgroupsremoved <- drop.tip(tree, tips)
+
+write.tree(outgroupsremoved, file = "/Users/maliasantos/Desktop/standard_ORC_FIXED_mcc_meanheights_SUBSET_18Mar25.tre")
+
+
+conda activate revbayesenv
+
+# Simple DEC
+
+module load revbayes
+module load gcc
+module load boost
+
+rb
+
+# First, create file management variables for input and output
+range_fn = "/cluster/medbow/project/tanklab/msantos2/revbayes/tricalysia_geographyinfo_2025.nexus"
+tree_fn = "/cluster/medbow/project/tanklab/msantos2/revbayes/standard_ORC_FIXED_mcc_meanheights_SUBSET_18Mar25.tre"
+out_fn = "/output/simple"
+
+
+# then read in our character data as binary presence-absence characters
+dat_range_01 = readDiscreteCharacterData(range_fn)
+
+# then encode the species ranges into natural numbers
+dat_range_n = formatDiscreteCharacterData(dat_range_01, "DEC")
+
+# Record the number of areas (characters) from the discrete character data object
+# data dimensions
+n_areas  = dat_range_01.nchar()
+n_states = floor(2^n_areas)
+
+# We’ll want to record the relationship between range states and range labels when producing an ancestral range estimate figure. First, store the vector of range state descriptions
+state_desc = dat_range_n.getStateDescriptions()
+
+# then write it to file
+state_desc_str = "state,range\n"
+for (i in 1:state_desc.size()){
+    state_desc_str += (i-1) + "," + state_desc[i] + "\n"
+}
+write(state_desc_str, file=out_fn+".state_labels.txt")
+
+################
+# Tree Models  #
+################
+
+# read tree
+tree <- readTrees(tree_fn)[1]
+
+#######################
+# Biogeography models #
+#######################
+
+# the biogeographic event rate multiplier
+rate_bg ~ dnLoguniform(1E-4,1E2)
+rate_bg.setValue(1E-2)
+moves.append( mvScale(rate_bg, weight=4) )
+
+# the relative dispersal rate
+dispersal_rate <- 1.0
+
+# build the relative dispersal rate matrix
+for (i in 1:n_areas) {
+    for (j in 1:n_areas) {
+        dr[i][j] <- dispersal_rate
+    }
+}
+
+# then the relative extirpation rate (or per-area extinction rates)
+log_sd <- 0.5
+log_mean <- ln(1) - 0.5*log_sd^2
+extirpation_rate ~ dnLognormal(mean=log_mean, sd=log_sd)
+moves.append( mvScale(extirpation_rate, weight=2) )
+
+# build the relative extirpation rate matrix
+for (i in 1:n_areas) {
+    for (j in 1:n_areas) {
+        er[i][j] <- 0.0       
+    }
+    er[i][i] := extirpation_rate
+}
+
+# build the DEC rate matrix
+Q_DEC := fnDECRateMatrix(dispersalRates=dr,
+                         extirpationRates=er)
+                           
+# build cladogenetic transition probabilities
+clado_event_types <- [ "s", "a" ]
+clado_event_probs <- simplex(1,1)
+P_DEC := fnDECCladoProbs(eventProbs=clado_event_probs,
+                         eventTypes=clado_event_types,
+                         numCharacters=n_areas)
+
+# the phylogenetic CTMC with cladogenetic events
+m_bg ~ dnPhyloCTMCClado(tree=tree,
+                           Q=Q_DEC,
+                           cladoProbs=P_DEC,
+                           branchRates=rate_bg,
+                           type="NaturalNumbers",
+                           nSites=1)
+    
+# attach the range data
+m_bg.clamp(dat_range_n)
+
+############
+# Monitors #
+############
+
+monitors.append( mnScreen(printgen=100, rate_bg) )
+monitors.append( mnModel(file=out_fn+".model.log", printgen=10) )
+monitors.append( mnFile(tree, filename=out_fn+".tre", printgen=10) )
+monitors.append( mnJointConditionalAncestralState(tree=tree,
+                                                  ctmc=m_bg,
+                                                  type="NaturalNumbers",
+                                                  withTips=true,
+                                                  withStartStates=true,
+                                                  filename=out_fn+".states.log",
+                                                  printgen=10) )
+monitors.append( mnStochasticCharacterMap(ctmc=m_bg,
+                                          filename=out_fn+".stoch.log",
+                                          printgen=100) )
+
+############
+# Analysis #
+############
+
+# build the model analysis object from the model graph
+mymodel = model(m_bg)
+
+# create the MCMC analysis object
+mymcmc = mcmc(mymodel, monitors, moves)
+
+# run the MCMC analysis
+mymcmc.run(1000)
+
+# exit
+quit()
+
+
+
+
+
+
+
+
+# Summarizing COMBINED runs - did not work
+
+#set paths
+out_str = "combined/simple.combined"
+out_state_fn = out_str + ".states.log"
+out_tree_fn = out_str + ".trees"
+out_mcc_fn = out_str + ".mcc.tre" 
+
+#This step would be more useful if we had estimated the tree too and had to summarize it, but now it just gives us a file with the tree inthe right format:
+
+tree_trace = readTreeTrace(file=out_tree_fn, treetype="clock")
+tree_trace.setBurnin(0.25)
+n_burn = tree_trace.getBurnin()
+mcc_tree = mccTree(tree_trace, file=out_mcc_fn)
+
+
+#We load the node state trace:
+state_trace = readAncestralStateTrace(file=out_state_fn)
+
+
+
+#We load the tree trace again, but this time as a different object:
+
+tree_trace = readAncestralStateTreeTrace(file=out_tree_fn, treetype="clock")
+
+
+#And finally summarize the ancestral state results on the MCC tree:
+anc_tree = ancestralStateTree(tree=mcc_tree,
+                              ancestral_state_trace_vector=state_trace,
+                              tree_trace=tree_trace,
+                              include_start_states=true,
+                              file=out_str+".ase.tre",
+                              burnin=n_burn,
+                                 site=1)
