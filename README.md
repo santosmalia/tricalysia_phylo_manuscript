@@ -39,7 +39,9 @@ The resulting exon and supercontig datasets were used for downstream phylogenomi
 
 ---
 
-## 3. Sequence Alignment
+## 3. Sequence Alignment 
+
+**Script:** `align_and_clean.slurm`
 
 Recovered supercontig sequences were aligned using MAFFT (Katoh et al. 2002).
 
