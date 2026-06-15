@@ -64,7 +64,7 @@ This produced the final datasets used for phylogenetic analyses.
 
 ## 5. Phylogenetic Tree Reconstruction
 
-**Script:** `phylogenetics_tricalysia.slurm`
+**Scripts:** `phylogenetics_tricalysia.slurm` `astral.slurm`
 
 Phylogenetic relationships were inferred using both concatenation and coalescent-based approaches.
 
@@ -80,7 +80,19 @@ Concatenated phylogenetic hypotheses were reconstructed using IQ-TREE 2.
 
 Species trees were inferred from gene trees using ASTRAL-III.
 
+
+## 6. Phyparts
+**Scripts:** `phyparts.pieplot.slurm`
+
 ---
+
+## 7. RevBayes
+**Scripts:** `revbayes_tricalysia_2025.txt`
+
+---
+
+## 8. Coalesccent Simulations
+**Scripts:** `coalescent_simulations.slurm`
 
 ## References
 
